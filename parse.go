@@ -284,6 +284,7 @@ type parseOptSet struct {
 	skipProcessingPixelDataValue       bool
 	allowMissingMetaElementGroupLength bool
 	allowUnknownSpecificCharacterSet   bool
+	allowMismatchFloatValueLength      bool
 }
 
 func toParseOptSet(opts ...ParseOption) parseOptSet {
@@ -298,6 +299,12 @@ func toParseOptSet(opts ...ParseOption) parseOptSet {
 func AllowMismatchPixelDataLength() ParseOption {
 	return func(set *parseOptSet) {
 		set.allowMismatchPixelDataLength = true
+	}
+}
+
+func AllowMismatchFloatValueLength() ParseOption {
+	return func(set *parseOptSet) {
+		set.allowMismatchFloatValueLength = true
 	}
 }
 

@@ -78,6 +78,7 @@ func TestReadFloat_float64(t *testing.T) {
 		name        string
 		floats      []float64
 		VR          string
+		opts        []ParseOption
 		want        Value
 		expectedErr error
 	}{
@@ -95,6 +96,14 @@ func TestReadFloat_float64(t *testing.T) {
 			want:        nil,
 			expectedErr: errorUnableToParseFloat,
 		},
+		{
+			name:        "float64 with AllowMismatchFloatValueLength",
+			floats:      []float64{20.1, 32.22},
+			VR:          vrraw.FloatingPointDouble,
+			opts:        []ParseOption{AllowMismatchFloatValueLength()},
+			want:        &floatsValue{value: []float64{20.1, 32.22}},
+			expectedErr: nil,
+		},
 	}
 
 	for _, tc := range cases {
@@ -108,6 +117,7 @@ func TestReadFloat_float64(t *testing.T) {
 
 			r := &reader{
 				rawReader: dicomio.NewReader(bufio.NewReader(&data), binary.LittleEndian, int64(data.Len())),
+				opts:      toParseOptSet(tc.opts...),
 			}
 			got, err := r.readFloat(tag.Tag{}, tc.VR, uint32(data.Len()))
 			if !errors.Is(err, tc.expectedErr) {
@@ -125,6 +135,7 @@ func TestReadFloat_float32(t *testing.T) {
 		name        string
 		floats      []float32
 		VR          string
+		opts        []ParseOption
 		want        Value
 		expectedErr error
 	}{
@@ -142,6 +153,14 @@ func TestReadFloat_float32(t *testing.T) {
 			want:        nil,
 			expectedErr: errorUnableToParseFloat,
 		},
+		{
+			name:        "float32 with AllowMismatchFloatValueLength",
+			floats:      []float32{12.5},
+			VR:          vrraw.FloatingPointSingle,
+			opts:        []ParseOption{AllowMismatchFloatValueLength()},
+			want:        &floatsValue{value: []float64{12.5}},
+			expectedErr: nil,
+		},
 	}
 
 	for _, tc := range cases {
@@ -155,6 +174,7 @@ func TestReadFloat_float32(t *testing.T) {
 
 			r := &reader{
 				rawReader: dicomio.NewReader(bufio.NewReader(&data), binary.LittleEndian, int64(data.Len())),
+				opts:      toParseOptSet(tc.opts...),
 			}
 			got, err := r.readFloat(tag.Tag{}, tc.VR, uint32(data.Len()))
 			if !errors.Is(err, tc.expectedErr) {
@@ -162,6 +182,79 @@ func TestReadFloat_float32(t *testing.T) {
 			}
 			if diff := cmp.Diff(got, tc.want, cmp.AllowUnexported(floatsValue{})); diff != "" {
 				t.Errorf("readFloat(r, tg, %s, %d) unexpected diff: %s", tc.VR, data.Len(), diff)
+			}
+		})
+	}
+}
+
+func TestReadFloat_mismatchValueLength(t *testing.T) {
+	sentinel := uint16(0xBEEF)
+	cases := []struct {
+		name           string
+		value          []byte
+		VR             string
+		opts           []ParseOption
+		want           Value
+		expectedErr    error
+		expectedErrMsg string
+	}{
+		{
+			name:        "FD with VL 4 and the option on reads as empty Floats and skips the value",
+			value:       []byte("12.5"),
+			VR:          vrraw.FloatingPointDouble,
+			opts:        []ParseOption{AllowMismatchFloatValueLength()},
+			want:        &floatsValue{},
+			expectedErr: nil,
+		},
+		{
+			name:        "FL with VL 6 and the option on reads as empty Floats and skips the value",
+			value:       []byte("12.50 "),
+			VR:          vrraw.FloatingPointSingle,
+			opts:        []ParseOption{AllowMismatchFloatValueLength()},
+			want:        &floatsValue{},
+			expectedErr: nil,
+		},
+		{
+			name:           "FD with VL 4 and the option off fails as in v1.1.0",
+			value:          []byte("12.5"),
+			VR:             vrraw.FloatingPointDouble,
+			want:           nil,
+			expectedErr:    io.ErrUnexpectedEOF,
+			expectedErrMsg: "error reading floating point element ((0018,1411)) value: unexpected EOF",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data := bytes.Buffer{}
+			data.Write(tc.value)
+			if err := binary.Write(&data, binary.LittleEndian, sentinel); err != nil {
+				t.Errorf("TestReadFloat: Unable to setup test buffer")
+			}
+
+			r := &reader{
+				rawReader: dicomio.NewReader(bufio.NewReader(&data), binary.LittleEndian, int64(data.Len())),
+				opts:      toParseOptSet(tc.opts...),
+			}
+			got, err := r.readFloat(tag.ExposureIndex, tc.VR, uint32(len(tc.value)))
+			if !errors.Is(err, tc.expectedErr) {
+				t.Fatalf("readFloat(r, tg, %s, %d) got unexpected error: got: %v, want: %v", tc.VR, len(tc.value), err, tc.expectedErr)
+			}
+			if tc.expectedErrMsg != "" && err.Error() != tc.expectedErrMsg {
+				t.Fatalf("readFloat(r, tg, %s, %d) got unexpected error message: got: %v, want: %v", tc.VR, len(tc.value), err, tc.expectedErrMsg)
+			}
+			if diff := cmp.Diff(got, tc.want, cmp.AllowUnexported(floatsValue{}), cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("readFloat(r, tg, %s, %d) unexpected diff: %s", tc.VR, len(tc.value), diff)
+			}
+			if tc.expectedErr != nil {
+				return
+			}
+			next, err := r.rawReader.ReadUInt16()
+			if err != nil {
+				t.Fatalf("ReadUInt16 after readFloat got unexpected error: %v", err)
+			}
+			if next != sentinel {
+				t.Errorf("ReadUInt16 after readFloat got: %#x, want sentinel: %#x", next, sentinel)
 			}
 		})
 	}

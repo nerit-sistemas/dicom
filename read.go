@@ -738,6 +738,14 @@ func (r *reader) readFloat(t tag.Tag, vr string, vl uint32) (Value, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer r.rawReader.PopLimit()
+	size := uint32(8)
+	if vr == vrraw.FloatingPointSingle {
+		size = 4
+	}
+	if r.opts.allowMismatchFloatValueLength && vl%size != 0 {
+		return &floatsValue{}, nil
+	}
 	retVal := &floatsValue{value: make([]float64, 0, vl/2)}
 	for !r.rawReader.IsLimitExhausted() {
 		switch vr {
@@ -766,7 +774,6 @@ func (r *reader) readFloat(t tag.Tag, vr string, vl uint32) (Value, error) {
 			return nil, fmt.Errorf("error reading floating point element(%v) value: unsupported VR: %w", t, errorUnableToParseFloat)
 		}
 	}
-	r.rawReader.PopLimit()
 	return retVal, nil
 }
 
